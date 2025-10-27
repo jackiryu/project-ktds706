@@ -1,4 +1,4 @@
-# 📊 RFP 분석 및 사전 분석을 통한 PRE-PRB 엑셀자료 만들기
+# 📊 RFP 분석 및 사전 자료 수집을 통한 PRE-PRB 엑셀자료 만들기
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
