@@ -5,7 +5,7 @@
 [![Build](https://img.shields.io/badge/Build-Passing-brightgreen.svg)]()
 [![Status](https://img.shields.io/badge/Stage-Development-orange.svg)]()
 
----
+테스트 URL : https://github.com/jackiryu/project-ktds706.git
 
 ## 📘 프로젝트 개요
 
