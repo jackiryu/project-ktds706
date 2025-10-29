@@ -1,0 +1,26 @@
+# Web Framework
+streamlit
+
+# Azure Services
+azure-storage-blob
+azure-search-documents
+azure-identity
+
+# AI/ML
+openai
+
+# Document Processing
+python-docx
+PyPDF2
+pdfplumber
+
+# Data Processing
+pandas
+numpy
+
+# Configuration
+python-dotenv
+
+# HTTP Requests
+requests
+
