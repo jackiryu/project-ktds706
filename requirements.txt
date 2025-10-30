@@ -11,9 +11,10 @@ openai
 
 # Document Processing
 python-docx
-PyPDF2
 pdfplumber
 openpyxl
+PyMuPDF>=1.22.0
+
 
 # Data Processing
 pandas
