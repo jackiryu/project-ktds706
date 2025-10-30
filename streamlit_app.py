@@ -5,6 +5,11 @@ from datetime import datetime
 from app import RFPAnalyzer
 import fitz  # PyMuPDF
 import docx  # python-docx
+import openpyxl
+import io
+import re
+from azure.storage.blob import BlobServiceClient
+import os
 
 # 페이지 설정 및 세션 상태 초기화
 st.set_page_config(page_title="RFP 분석 대시보드", layout="wide")
@@ -70,12 +75,102 @@ def extract_docx_text(file):
     except Exception as e:
         return f"(DOCX 파싱 오류: {e})"
 
+
+def parse_llm_response(response_text):
+    """LLM 응답에서 필요한 항목들을 추출"""
+    def extract_value(pattern, text):
+        m = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+        return m.group(1).strip() if m else "내용 없음"
+    
+    parsed = {
+        "사업명": extract_value(r"사업명[:\s]+(.+?)(?:\n|$)", response_text),
+        "사업기간": extract_value(r"사업\s*기간[:\s]+(.+?)(?:\n|$)", response_text),
+        "사업목적/범위": extract_value(r"사업\s*목적[/\s]*범위[:\s]+(.+?)(?:\n|핵심|$)", response_text),
+        "핵심기술": extract_value(r"핵심\s*기술[:\s]+(.+?)(?:\n|$)", response_text),
+        "고객사명": extract_value(r"고객사명[:\s]+(.+?)(?:\n|$)", response_text),
+        "사업주관담당자": extract_value(r"사업\s*주관\s*담당자[:\s]+(.+?)(?:\n|$)", response_text),
+        "사업주관조직": extract_value(r"사업\s*주관\s*조직[:\s]+(.+?)(?:\n|$)", response_text),
+        "사업설명회일자": extract_value(r"사업\s*설명회\s*일자[:\s]+(.+?)(?:\n|$)", response_text),
+        "입찰일자": extract_value(r"입찰\s*일자[:\s]+(.+?)(?:\n|$)", response_text),
+        "PT발표일": extract_value(r"PT\s*발표일[:\s]+(.+?)(?:\n|$)", response_text),
+        "우선협상대상자선정발표일": extract_value(r"우선\s*협상\s*대상자\s*선정\s*발표일[:\s]+(.+?)(?:\n|$)", response_text),
+        "주요체크사항": extract_value(r"주요\s*체크\s*사항[:\s]+(.+)", response_text)
+    }
+    
+    return parsed
+
+def download_and_update_excel(parsed_data):
+    """Azure Blob Storage에서 엑셀 템플릿 다운로드 및 업데이트"""
+    try:
+        # Azure Storage 연결 (환경변수에서 가져오기)
+        connect_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        if not connect_str:
+            st.error("❌ AZURE_STORAGE_CONNECTION_STRING 환경변수가 설정되지 않았습니다.")
+            return None
+        
+        container_name = os.getenv("AZURE_STORAGE_CONTAINER_NAME", "templates")
+        blob_name = "Pre-ORB_사업명_YYMMDD_v1.0.xlsx"
+        
+        # Blob 다운로드
+        blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+        blob_data = blob_client.download_blob().readall()
+        
+        # openpyxl로 엑셀 파일 로드
+        wb = openpyxl.load_workbook(io.BytesIO(blob_data))
+        ws = wb.active
+        
+        # 각 항목명을 찾아서 값 입력
+        for row in ws.iter_rows():
+            for cell in row:
+                cell_value = str(cell.value).strip() if cell.value else ""
+                
+                # 각 항목명과 매칭
+                if "사업명" in cell_value and "사업설명회" not in cell_value:
+                    cell.offset(column=1).value = parsed_data["사업명"]
+                elif "사업기간" in cell_value or "사업 기간" in cell_value:
+                    cell.offset(column=1).value = parsed_data["사업기간"]
+                elif "사업목적" in cell_value or "사업 목적" in cell_value or "범위" in cell_value:
+                    cell.offset(column=1).value = parsed_data["사업목적/범위"]
+                elif "핵심기술" in cell_value or "핵심 기술" in cell_value:
+                    cell.offset(column=1).value = parsed_data["핵심기술"]
+                elif "고객사명" in cell_value:
+                    cell.offset(column=1).value = parsed_data["고객사명"]
+                elif "사업주관담당자" in cell_value or "사업 주관 담당자" in cell_value:
+                    cell.offset(column=1).value = parsed_data["사업주관담당자"]
+                elif "사업주관조직" in cell_value or "사업 주관 조직" in cell_value:
+                    cell.offset(column=1).value = parsed_data["사업주관조직"]
+                elif "사업설명회일자" in cell_value or "사업설명회 일자" in cell_value:
+                    cell.offset(column=1).value = parsed_data["사업설명회일자"]
+                elif "입찰일자" in cell_value or "입찰 일자" in cell_value:
+                    cell.offset(column=1).value = parsed_data["입찰일자"]
+                elif "PT발표일" in cell_value or "PT 발표일" in cell_value:
+                    cell.offset(column=1).value = parsed_data["PT발표일"]
+                elif "우선협상" in cell_value and "발표일" in cell_value:
+                    cell.offset(column=1).value = parsed_data["우선협상대상자선정발표일"]
+                elif "주요체크사항" in cell_value or "주요 체크사항" in cell_value or "주요 체크 사항" in cell_value:
+                    # 주요 체크사항은 아래쪽 셀에 입력
+                    cell.offset(row=1).value = parsed_data["주요체크사항"]
+        
+        # 메모리에 저장
+        output_stream = io.BytesIO()
+        wb.save(output_stream)
+        output_stream.seek(0)
+        
+        return output_stream
+        
+    except Exception as e:
+        st.error(f"❌ 엑셀 처리 중 오류 발생: {e}")
+        return None
+
+
+
 with st.sidebar:
     st.header("⚙️ 설정")
     
     # 검색 설정
     st.subheader("검색 옵션")
-    top_n = st.number_input("가져올 문서 수 (top N)", min_value=1, max_value=20, value=5)
+    top_n = st.number_input("가져올 문서 수 (top N)", min_value=1, max_value=20, value=8)
     
     # 키워드 하이라이트
     st.subheader("키워드 하이라이트")
@@ -114,8 +209,7 @@ col1, col2 = st.columns([3, 1])
 with col2:
     # define default query here so it's available to the button handler before text_area
     query_default = (
-        "RFP 문서를 참고해서 사업명, 사업기간, 사업목적, 사업범위, 핵심기술, 고객사명, "
-        "사업설명회날짜, 입찰일자, PT발표일, 우선협상대상자 선정 발표일, 제약사항을 알려주세요."
+        "은행의 BPR 프로젝트 관련 RFP 문서 찾아줘. "
     )
 
     # 기본 쿼리 불러오기 동작: 버튼 클릭 시 session_state에 기록
@@ -156,7 +250,7 @@ if run_button or use_prefill_and_execute:
 
                     # Convert to plain dicts for session storage and display
                     raw_docs = [dict(d) for d in raw_docs]
-
+                    
                     # 검색 히스토리 저장
                     st.session_state.search_history.append({
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -186,10 +280,16 @@ if run_button or use_prefill_and_execute:
                         elif sort_by == "프로젝트명":
                             docs_list.sort(key=lambda x: x["프로젝트명"] or "")
 
-                    # 저장: 원본(raw_docs)과 표시용(docs_list)
-                    st.session_state.last_raw_docs = raw_docs
-                    st.session_state.last_display_docs = docs_list
 
+
+                    chunks = []
+                    for doc in raw_docs:
+                        if isinstance(doc, dict) and "chunk" in doc:
+                            chunks.append(doc["chunk"])
+
+                    st.session_state.last_raw_docs = chunks
+                    st.session_state.last_display_docs = docs_list
+                    # print("############ last_raw_docs:", st.session_state.last_raw_docs)
                     st.success(f"✅ 검색 완료 — {len(docs_list)}개 문서를 찾았습니다.")
 
                 except Exception as e:
@@ -256,17 +356,21 @@ if "last_display_docs" in st.session_state and st.session_state.last_display_doc
     st.markdown("---")
     st.header("🤖 AI 분석")
     st.write("검색된 문서와 업로드된 문서를 기반으로 LLM에게 추가 질의를 하려면 아래에 질문을 입력하고 'AI 분석 생성' 버튼을 누르세요.")
-    llm_prompt = st.text_area("LLM에 보낼 질문/프롬프트", value="RFP 문서를 참고하여 주요 요구사항을 요약해 주세요.", height=120)
+    llm_prompt = st.text_area("LLM에 보낼 질문/프롬프트"
+                              , value="RFP 문서를 참고해서 아래 항목에 맞는 내용을 요약해주세요."
+        "사업명, 사업기간, 사업목적/범위, "
+        "핵심 기술, 고객사명, 사업 주관 담당자, 사업 주관 조직, 사업설명회 일자, 입찰 일자, PT발표일, 우선협상 대상자 선정 발표일, "
+        "주요 체크사항을 알려주세요. 단, 해당항목이 없을 경우에는 내용 없음으로 답변해주세요." 
+        "출력은 반드시 요청한 항목명과 그에 상응하는 값만을 포함하도록 해주세요.", height=120)
     # 기존 검색 문서 + 업로드 문서 합치기
     all_docs = st.session_state.get("last_raw_docs", []) + st.session_state.get("uploaded_docs", [])
     doc_labels = []
     filtered_docs = []
     for i, doc in enumerate(all_docs):
-        label = doc.get("프로젝트명") or doc.get("projectName")
+        label = "문서" + str(i)
         if label:  # 문서명이 있으면만 옵션에 추가
             doc_labels.append(label)
             filtered_docs.append(doc)
-            
     selected_labels = st.multiselect(
         "분석에 포함할 문서 선택",
         options=doc_labels,
@@ -289,10 +393,43 @@ if "last_display_docs" in st.session_state and st.session_state.last_display_doc
                     st.subheader("🤖 LLM 응답")
                     st.info(highlight_text(response_text, highlight_keywords))
                     st.session_state.last_llm_response = response_text
+                    
+                    # LLM 응답에서 항목 추출
+                    parsed_data = parse_llm_response(response_text)
+                    st.session_state.parsed_data = parsed_data
+                    
+                    # 추출된 데이터 표시
+                    with st.expander("📋 추출된 데이터 확인"):
+                        for key, value in parsed_data.items():
+                            st.text(f"{key}: {value}")
+                    
                 except Exception as e:
                     st.error(f"LLM 호출 중 오류가 발생했습니다: {e}")
+
+    # Pre-ORB 자료 생성 버튼
+    if "parsed_data" in st.session_state and st.session_state.parsed_data:
+        st.markdown("---")
+        if st.button("📄 Pre-ORB 자료 생성", help="Azure Blob Storage에서 템플릿을 다운로드하고 데이터를 채워 엑셀 파일을 생성합니다"):
+            with st.spinner("Pre-ORB 자료 생성 중..."):
+                excel_stream = download_and_update_excel(st.session_state.parsed_data)
+                
+                if excel_stream:
+                    # 파일명 생성 (사업명_날짜)
+                    project_name = st.session_state.parsed_data.get("사업명", "사업명")
+                    safe_name = re.sub(r'[\\/*?:"<>|]', "", project_name)
+                    today_str = datetime.today().strftime("%Y%m%d")
+                    file_name = f"Pre-ORB_{safe_name}_{today_str}_v1.0.xlsx"
+                    
+                    st.success("✅ Pre-ORB 자료가 생성되었습니다!")
+                    st.download_button(
+                        label="📥 Pre-ORB 엑셀 다운로드",
+                        data=excel_stream.getvalue(),
+                        file_name=file_name,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 else:
     st.info("검색을 먼저 실행하면 문서 목록이 여기 표시됩니다. 그 다음 LLM에 질문을 보내 추가 분석을 받을 수 있습니다.")
 
 st.markdown("---")
-st.caption("환경변수: AZURE_SEARCH_API_KEY, AZURE_SEARCH_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_DEPLOYMENT_MODEL 필요")
+# st.caption("환경변수: AZURE_SEARCH_API_KEY, AZURE_SEARCH_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_DEPLOYMENT_MODEL 필요")
+

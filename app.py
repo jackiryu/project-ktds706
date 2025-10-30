@@ -77,7 +77,9 @@ class RFPAnalyzer:
 
     def _format_sources(self, documents: List[Any]) -> str:
         parts = []
+
         for doc in documents:
+            
             # normalize skillsets
             skillsets_value = doc.get("skillsets", [])
             if isinstance(skillsets_value, str):
@@ -141,7 +143,7 @@ class RFPAnalyzer:
         This separates the expensive LLM call from the search step so the UI can
         present documents first and call the model only when requested.
         """
-        sources_formatted = self._format_sources(documents)
+        # sources_formatted = self._format_sources(documents)
 
         try:
             response = self.openai_client.chat.completions.create(
@@ -149,9 +151,10 @@ class RFPAnalyzer:
                 messages=[
                     {
                         "role": "user",
-                        "content": GROUNDED_PROMPT.format(query=prompt, sources=sources_formatted),
+                        "content": GROUNDED_PROMPT.format(query=prompt, sources=documents),
                     }
                 ],
+                temperature=0.8,
             )
 
             response_text = response.choices[0].message.content
@@ -164,9 +167,7 @@ class RFPAnalyzer:
 if __name__ == "__main__":
     # default query used in both CLI and Streamlit UI
     default_query = (
-        "RFP 문서를 참고해서 사업명, 사업기간, 사업목적, 사업범위, "
-        "핵심기술, 고객사명, 사업설명회날짜, 입찰일자, PT발표일, 우선협상대상자 선정 발표일, "
-        "제약사항을 알려주세요. 단, 해당항목이 없을 경우에는 내용 없음으로 답변해주세요"
+        "은행의 BPR 프로젝트 관련 RFP 문서 찾아줘. "
     )
 
     # If user explicitly asks for CLI mode, keep the old behavior

@@ -13,6 +13,7 @@ openai
 python-docx
 PyPDF2
 pdfplumber
+openpyxl
 
 # Data Processing
 pandas
