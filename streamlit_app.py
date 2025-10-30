@@ -25,10 +25,10 @@ st.markdown(
     
     ### 기능
     - 🔍 문서 검색 및 AI 기반 분석
-    - 💡 키워드 하이라이트
-    - 📊 검색 결과 정렬/필터링
-    - 💾 JSON 형식으로 결과 저장
+    - 📊 검색 문서 요약
+    - 💾 추가 문서 업로드
     - 📜 검색 히스토리 관리
+    - 💡 키워드 하이라이트
     """
 )
 
@@ -144,11 +144,11 @@ def download_and_update_excel(parsed_data):
                     cell.offset(column=1).value = parsed_data["사업설명회일자"]
                 elif "입찰일자" in cell_value or "입찰 일자" in cell_value:
                     cell.offset(column=1).value = parsed_data["입찰일자"]
-                elif "PT발표일" in cell_value or "PT 발표일" in cell_value:
+                elif "PT발표일" in cell_value or "PT 발표일" in cell_value or "제안 설명회" in cell_value or "제안설명회" in cell_value:
                     cell.offset(column=1).value = parsed_data["PT발표일"]
-                elif "우선협상" in cell_value and "발표일" in cell_value:
+                elif "우선협상" in cell_value and "발표일" in cell_value or "우선협상대상자 선정" in cell_value:
                     cell.offset(column=1).value = parsed_data["우선협상대상자선정발표일"]
-                elif "주요체크사항" in cell_value or "주요 체크사항" in cell_value or "주요 체크 사항" in cell_value:
+                elif "주요체크사항" in cell_value or "주요 체크사항" in cell_value or "주요 체크 사항" in cell_value or "유의 사항" in cell_value:
                     # 주요 체크사항은 아래쪽 셀에 입력
                     cell.offset(row=1).value = parsed_data["주요체크사항"]
         
@@ -367,10 +367,11 @@ if "last_display_docs" in st.session_state and st.session_state.last_display_doc
     doc_labels = []
     filtered_docs = []
     for i, doc in enumerate(all_docs):
-        label = "문서" + str(i)
-        if label:  # 문서명이 있으면만 옵션에 추가
-            doc_labels.append(label)
-            filtered_docs.append(doc)
+        # 문서명이 있으면 label에 문서명, 없으면 '문서' + 번호로 세팅
+        doc_name = doc.get("프로젝트명") if isinstance(doc, dict) else None
+        label = doc_name if doc_name else f"문서{i+1}"
+        doc_labels.append(label)
+        filtered_docs.append(doc)
     selected_labels = st.multiselect(
         "분석에 포함할 문서 선택",
         options=doc_labels,
@@ -390,21 +391,30 @@ if "last_display_docs" in st.session_state and st.session_state.last_display_doc
                 try:
                     analyzer = RFPAnalyzer()
                     response_text = analyzer.generate_from_documents(selected_docs, prompt=llm_prompt)
-                    st.subheader("🤖 LLM 응답")
-                    st.info(highlight_text(response_text, highlight_keywords))
                     st.session_state.last_llm_response = response_text
-                    
-                    # LLM 응답에서 항목 추출
                     parsed_data = parse_llm_response(response_text)
                     st.session_state.parsed_data = parsed_data
-                    
-                    # 추출된 데이터 표시
-                    with st.expander("📋 추출된 데이터 확인"):
-                        for key, value in parsed_data.items():
-                            st.text(f"{key}: {value}")
-                    
                 except Exception as e:
                     st.error(f"LLM 호출 중 오류가 발생했습니다: {e}")
+
+    # LLM 응답 항상 표시 (접었다 폈다 가능)
+    if "last_llm_response" in st.session_state:
+        with st.expander("🤖 LLM 응답 보기", expanded=False):
+            text = st.session_state.last_llm_response
+            num_lines = text.count('\n') + 1
+            height = min(800, max(120, num_lines * 24))  # 24px per line, 최대 800px 제한
+            st.text_area("LLM 응답", value=text, height=height)
+
+    # 추출된 데이터 항상 표시 (접었다 폈다 가능)
+    if "parsed_data" in st.session_state:
+        with st.expander("📋 추출된 데이터 확인", expanded=False):
+            for key, value in st.session_state.parsed_data.items():
+                if isinstance(value, str) and ('\n' in value or len(value) > 80):
+                    num_lines = value.count('\n') + 1
+                    height = min(800, max(80, num_lines * 24 + 40))
+                    st.text_area(f"{key}", value=value, height=height, disabled=True)
+                else:
+                    st.text(f"{key}: {value}")
 
     # Pre-ORB 자료 생성 버튼
     if "parsed_data" in st.session_state and st.session_state.parsed_data:
