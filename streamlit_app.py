@@ -3,6 +3,8 @@ import pandas as pd
 import json
 from datetime import datetime
 from app import RFPAnalyzer
+import fitz  # PyMuPDF
+import docx  # python-docx
 
 # 페이지 설정 및 세션 상태 초기화
 st.set_page_config(page_title="RFP 분석 대시보드", layout="wide")
@@ -47,6 +49,26 @@ def save_to_json(data, filename_prefix="rfp_search"):
         json.dump(data, f, ensure_ascii=False, indent=2)
     
     return filename
+
+def extract_pdf_text(file):
+    """PDF 파일에서 텍스트 추출"""
+    try:
+        with fitz.open(stream=file) as doc:
+            text = ""
+            for page in doc:
+                text += page.get_text()
+        return text
+    except Exception as e:
+        return f"(PDF 파싱 오류: {e})"
+
+def extract_docx_text(file):
+    """DOCX 파일에서 텍스트 추출"""
+    try:
+        doc = docx.Document(file)
+        text = "\n".join([p.text for p in doc.paragraphs])
+        return text
+    except Exception as e:
+        return f"(DOCX 파싱 오류: {e})"
 
 with st.sidebar:
     st.header("⚙️ 설정")
@@ -95,22 +117,18 @@ with col2:
         "RFP 문서를 참고해서 사업명, 사업기간, 사업목적, 사업범위, 핵심기술, 고객사명, "
         "사업설명회날짜, 입찰일자, PT발표일, 우선협상대상자 선정 발표일, 제약사항을 알려주세요."
     )
-    st.markdown("### 🎯 빠른 실행")
-    st.markdown("미리 정의된 쿼리로 빠르게 실행")
+
     # 기본 쿼리 불러오기 동작: 버튼 클릭 시 session_state에 기록
     if st.button("📋 기본 쿼리 불러오기", help="클릭하면 기본 쿼리를 프롬프트에 채웁니다", key="prefill_button"):
         st.session_state.query = query_default
         st.session_state.prefilled = True
 
     # 보여진 기본쿼리로 즉시 실행할지 옵션 (기본 쿼리를 불러온 경우에만 표시)
-    if st.session_state.get("prefilled", False):
-        # Determine default checkbox value without assigning to session_state (avoids StreamlitAPIException)
-        default_use = st.session_state.get("use_default_execute", False)
-        use_default_execute = st.checkbox(
-            "불러온 기본쿼리로 즉시 실행",
-            value=default_use,
-            key="use_default_execute",
-        )
+    # 쿼리 실행 버튼은 항상 표시
+    if st.button("🚀 쿼리 실행", key="execute_loaded_query", help="현재 입력된 쿼리로 검색을 실행합니다."):
+        st.session_state.use_default_execute = True
+    else:
+        st.session_state.use_default_execute = False
 
 with col1:
     # 텍스트 영역은 세션 상태 'query'를 사용하여 동적으로 업데이트 가능하게 만듭니다.
@@ -202,11 +220,62 @@ if "last_display_docs" in st.session_state and st.session_state.last_display_doc
                 st.markdown("**🔹 본문 내용**")
                 st.markdown(highlight_text(d["본문"], highlight_keywords))
 
-    # LLM 프롬프트 입력 및 실행 섹션
+    # --- 추가 파일 업로드 섹션 (AI 분석 위) ---
     st.markdown("---")
-    st.header("🤖 AI 분석 (선택)")
-    st.write("검색된 문서들을 기반으로 LLM에게 추가 질의를 하려면 아래에 질문을 입력하고 'AI 분석 생성' 버튼을 누르세요.")
+    st.subheader("📎 추가 문서 업로드 (선택사항)")
+    uploaded_files = st.file_uploader(
+        "분석에 포함할 추가 문서를 선택하세요 (여러 파일 선택 가능)",
+        accept_multiple_files=True,
+        type=['txt', 'pdf', 'docx']
+    )
+    uploaded_docs = []
+    if uploaded_files:
+        for file in uploaded_files:
+            if file.type == "text/plain":
+                content = file.read().decode("utf-8")
+            elif file.type == "application/pdf":
+                content = extract_pdf_text(file)  # 실제 PDF 파싱은 별도 구현 필요
+            elif file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                content = extract_docx_text(file)  # 실제 DOCX 파싱은 별도 구현 필요
+            else:
+                content = "(알 수 없는 파일 형식)"
+            uploaded_docs.append({
+                "프로젝트명": file.name,
+                "chunk": content,
+                "기능요구사항": "",
+                "비기능요구사항": "",
+                "기술요구사항": "",
+                "스킬셋": [],
+                "중요도": 0.0
+            })
+        st.session_state.uploaded_docs = uploaded_docs
+    else:
+        st.session_state.uploaded_docs = []
+
+    # --- LLM 프롬프트 입력 및 실행 섹션 ---
+    st.markdown("---")
+    st.header("🤖 AI 분석")
+    st.write("검색된 문서와 업로드된 문서를 기반으로 LLM에게 추가 질의를 하려면 아래에 질문을 입력하고 'AI 분석 생성' 버튼을 누르세요.")
     llm_prompt = st.text_area("LLM에 보낼 질문/프롬프트", value="RFP 문서를 참고하여 주요 요구사항을 요약해 주세요.", height=120)
+    # 기존 검색 문서 + 업로드 문서 합치기
+    all_docs = st.session_state.get("last_raw_docs", []) + st.session_state.get("uploaded_docs", [])
+    doc_labels = []
+    filtered_docs = []
+    for i, doc in enumerate(all_docs):
+        label = doc.get("프로젝트명") or doc.get("projectName")
+        if label:  # 문서명이 있으면만 옵션에 추가
+            doc_labels.append(label)
+            filtered_docs.append(doc)
+            
+    selected_labels = st.multiselect(
+        "분석에 포함할 문서 선택",
+        options=doc_labels,
+        default=doc_labels,
+        help="분석에 포함할 문서를 선택하세요. 기본적으로 모든 문서가 선택됩니다."
+    )
+    selected_docs = [doc for doc, label in zip(all_docs, doc_labels) if label in selected_labels]
+    
+    
     gen_button = st.button("🧠 AI 분석 생성")
 
     if gen_button:
@@ -216,12 +285,9 @@ if "last_display_docs" in st.session_state and st.session_state.last_display_doc
             with st.spinner("LLM 호출 중... 잠시 기다려 주세요"):
                 try:
                     analyzer = RFPAnalyzer()
-                    # use raw docs (original keys) for grounding
-                    raw_docs = st.session_state.get("last_raw_docs", [])
-                    response_text = analyzer.generate_from_documents(raw_docs, prompt=llm_prompt)
+                    response_text = analyzer.generate_from_documents(selected_docs, prompt=llm_prompt)
                     st.subheader("🤖 LLM 응답")
                     st.info(highlight_text(response_text, highlight_keywords))
-                    # save last response
                     st.session_state.last_llm_response = response_text
                 except Exception as e:
                     st.error(f"LLM 호출 중 오류가 발생했습니다: {e}")
