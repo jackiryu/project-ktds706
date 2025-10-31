@@ -5,7 +5,7 @@
 [![Build](https://img.shields.io/badge/Build-Passing-brightgreen.svg)]()
 [![Status](https://img.shields.io/badge/Stage-Development-orange.svg)]() -->
 
-테스트 URL : https://project-ktds706.azurewebsites.net/
+URL : https://project-ktds706.azurewebsites.net/
 
 ## 목차
 - [프로젝트 개요](#프로젝트-개요)
