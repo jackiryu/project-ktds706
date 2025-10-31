@@ -15,6 +15,7 @@
 - [전체 구조](#전체-구조)
 - [폴더 구조](#폴더-구조)
 - [실행 방법](#실행-방법)
+- [향후 확장 방안](#향후-확장-방안)
 
 ## 프로젝트 개요
 **RFP(Request for Proposal)** 문서에서 핵심 요구사항을 자동으로 추출하고,  
@@ -50,7 +51,7 @@
 |-------------|------------|
 | **FrontEnd** | 🚀 Streamlit |
 | **BackEnd** | 🐍 Python 3.11+ |
-| **Azure AI** | Azure OpenAI (GPT-4.1)<br>Azure AI Search<br>Azure Blob Storage
+| **Azure AI** | Azure OpenAI (GPT-4.1-mini)<br>Azure AI Search<br>Azure Blob Storage
 | **문서 처리** | PyMuPDF · pdfplumber · python-docx |
 | **엑셀문서 생성** |  openpyxl |
 | **개발환경** | VS Code · Jupyter Notebook |
@@ -120,5 +121,10 @@ pip install -r requirements.txt
 ```bash
 streamlit run streamlit_app.py
 ```
+
+## 향후 확장 방안
+- 전사 수행경험, 본부 수행경험, 기술보유 개발자 수등을 사전학습 시킨 정보로
+  사업성검토sheet와 수행리스크검토sheet의 정량적 평가 자동화 
+- 종합의견란 시각화 대쉬보드를 구현
 
 
