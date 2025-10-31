@@ -51,7 +51,7 @@
 |-------------|------------|
 | **FrontEnd** | 🚀 Streamlit |
 | **BackEnd** | 🐍 Python 3.11+ |
-| **Azure AI** | Azure OpenAI (GPT-4.1-mini)<br>Azure AI Search<br>Azure Blob Storage
+| **Azure AI** | Azure OpenAI (GPT-4.1-mini, text-embedding-3-small)<br>Azure AI Search<br>Azure Blob Storage
 | **문서 처리** | PyMuPDF · pdfplumber · python-docx |
 | **엑셀문서 생성** |  openpyxl |
 | **개발환경** | VS Code · Jupyter Notebook |
